@@ -6,23 +6,29 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
 
 /** Runs yt-dlp for one link and returns the finished file (in the app cache). */
-class Downloader(private val context: Context) {
+class Downloader(
+    private val context: Context,
+    private val onProcessId: (String) -> Unit = {},
+) {
 
     /** A download strategy: optional YouTube extractor args + whether to enable the JS runtime. */
     private data class Profile(val extractorArgs: String?, val useJs: Boolean)
 
     fun run(url: String, mode: Mode, onProgress: (Int, String) -> Unit): File {
-        val dir = File(context.cacheDir, "dl/${System.currentTimeMillis()}")
-        dir.mkdirs()
+        val base = File(context.cacheDir, "dl/${System.currentTimeMillis()}")
+        base.mkdirs()
 
         val qjs = findQjs()
         val jsAvailable = qjs != null
 
-        // YouTube keeps rejecting media requests (HTTP 403). We start with the
-        // defaults, then fall back to player clients that bypass SABR/PO-token checks.
+        // Order matters: the "android" client serves plain direct streams
+        // (fast, and audio actually downloads). The default client often gets
+        // SABR streams, which YouTube throttles hard and may serve without
+        // audio — keep it as a quality fallback, and tv_embedded last because
+        // it never needs a PO token.
         val profiles = listOf(
-            Profile(null, jsAvailable),
             Profile("youtube:player_client=android", jsAvailable),
+            Profile(null, jsAvailable),
             Profile("youtube:player_client=tv_embedded", jsAvailable),
         )
 
@@ -30,27 +36,38 @@ class Downloader(private val context: Context) {
         // If the bundled yt-dlp doesn't know the JS options, retry once without them
         var jsBroken = false
 
-        for (profile in profiles) {
+        for ((index, profile) in profiles.withIndex()) {
+            // Each attempt gets its OWN folder. A failed attempt can leave a
+            // complete-looking but broken file behind (e.g. video without
+            // audio); it must never be picked up as the result.
+            val dir = File(base, "a${index + 1}").apply { mkdirs() }
             val request = build(url, mode, dir, profile.useJs && !jsBroken)
             profile.extractorArgs?.let { request.addOption("--extractor-args", it) }
             try {
                 execute(request, onProgress)
-                lastError = null
-                break
+                val files = dir.listFiles()?.filter { it.isFile && !isTemp(it.name) }.orEmpty()
+                val best = files.maxByOrNull { it.length() }
+                if (best != null) {
+                    // Flatten to base/ and drop the other attempts' leftovers
+                    val out = File(base, best.name)
+                    if (best.renameTo(out)) {
+                        base.listFiles()?.forEach { if (it.isDirectory) it.deleteRecursively() }
+                        return out
+                    }
+                    return best
+                }
+                lastError = IllegalStateException("لم يتم العثور على الملف بعد التنزيل")
             } catch (e: Exception) {
                 lastError = e
                 when {
                     looksLikeOptionError(e) -> jsBroken = true
-                    isRetryableMediaError(e) -> continue // try the next player client
+                    isRetryableMediaError(e) -> continue // try the next profile
                     else -> throw e
                 }
             }
         }
-        lastError?.let { throw it }
-
-        val files = dir.listFiles()?.filter { it.isFile && !isTemp(it.name) }.orEmpty()
-        return files.maxByOrNull { it.length() }
-            ?: throw IllegalStateException("لم يتم العثور على الملف بعد التنزيل")
+        base.deleteRecursively()
+        throw lastError ?: IllegalStateException("فشل التنزيل")
     }
 
     private fun findQjs(): File? {
@@ -64,20 +81,38 @@ class Downloader(private val context: Context) {
         request.addOption("--no-playlist")
         request.addOption("-o", File(dir, "%(title).80s [%(id)s].%(ext)s").absolutePath)
 
-        // Stability: look like a normal browser and survive flaky networks
+        // Optional members-only support: drop a Netscape-format cookies.txt
+        // (exported from a browser logged into the channel) into
+        // Android/data/com.stown.downloader/files/ and it's picked up here.
+        val cookies = cookiesFile()
+        if (cookies != null) {
+            request.addOption("--cookies", cookies.absolutePath)
+        }
+
+        // Stability + speed: look like a normal browser, survive flaky
+        // networks, skip formats that can't actually be fetched, and fetch
+        // DASH fragments in parallel.
         request.addOption("--user-agent", USER_AGENT)
         request.addOption("--retries", "10")
         request.addOption("--fragment-retries", "10")
         request.addOption("--extractor-retries", "3")
+        request.addOption("--check-formats")
+        request.addOption("-N", "4")
 
         when (mode) {
             Mode.VIDEO -> {
-                // Highest quality available, no user choice
-                request.addOption("-f", "bv*+ba/b")
+                // Highest quality available, no user choice.
+                // Audio must be AAC-in-MP4: Opus-in-MP4 merges play silently on
+                // many Android players, and SABR-only audio may download with no
+                // sound at all — so prefer m4a (AAC) first, anything second.
+                request.addOption(
+                    "-f",
+                    "bv*+ba[ext=m4a]/bv*+ba[acodec^=mp4a]/bv*+ba/b"
+                )
                 request.addOption("--merge-output-format", "mp4")
             }
             Mode.AUDIO -> {
-                request.addOption("-f", "ba/b")
+                request.addOption("-f", "ba[ext=m4a]/ba/b")
                 request.addOption("-x")
                 request.addOption("--audio-format", "mp3")
                 request.addOption("--audio-quality", "0")
@@ -94,10 +129,17 @@ class Downloader(private val context: Context) {
 
     private fun execute(request: YoutubeDLRequest, onProgress: (Int, String) -> Unit) {
         val processId = "stown-${System.nanoTime()}"
+        onProcessId(processId)
         YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
             val pct = if (progress < 0f) -1 else progress.toInt().coerceIn(0, 100)
             onProgress(pct, line ?: "")
         }
+    }
+
+    private fun cookiesFile(): File? {
+        val dir = context.getExternalFilesDir(null) ?: return null
+        val f = File(dir, "cookies.txt")
+        return if (f.isFile && f.length() > 0) f else null
     }
 
     private fun isTemp(name: String): Boolean {

@@ -17,4 +17,9 @@
     <string name="no_link">لم أجد رابطاً في المشاركة</string>
     <string name="channel_progress">التنزيلات الجارية</string>
     <string name="channel_result">نتائج التنزيل</string>
+    <string name="canceled">تم إلغاء التنزيل</string>
+    <string name="clipboard_no_link">الحافظة لا تحتوي على رابط</string>
+    <string name="paste">لصق</string>
+    <string name="clear">مسح</string>
+    <string name="queued">تمت الإضافة إلى الطابور — سيُنزّل بالترتيب</string>
 </resources>

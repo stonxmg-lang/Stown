@@ -32,7 +32,6 @@
             android:name=".ShareActivity"
             android:exported="true"
             android:excludeFromRecents="true"
-            android:taskAffinity=""
             android:theme="@style/Theme.Stown.Dialog">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

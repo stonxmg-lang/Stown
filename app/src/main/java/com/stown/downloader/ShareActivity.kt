@@ -32,8 +32,13 @@ class ShareActivity : AppCompatActivity() {
     }
 
     private fun begin(url: String, mode: Mode) {
+        val wasBusy = DownloadService.isBusy()
         DownloadService.start(this, url, mode)
-        Toast.makeText(this, R.string.started, Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            this,
+            if (wasBusy) R.string.queued else R.string.started,
+            Toast.LENGTH_SHORT
+        ).show()
         finish()
     }
 }

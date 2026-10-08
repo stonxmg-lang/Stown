@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -9,21 +10,24 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="@string/share_title"
-        android:textSize="18sp"
+        android:textAppearance="?attr/textAppearanceTitleLarge"
         android:textStyle="bold" />
 
     <TextView
         android:id="@+id/shareUrl"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="10dp"
+        android:background="?attr/selectableItemBackground"
         android:ellipsize="middle"
-        android:maxLines="2" />
+        android:maxLines="2"
+        android:textIsSelectable="true"
+        android:textAppearance="?attr/textAppearanceBodyMedium" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
+        android:layout_marginTop="24dp"
         android:orientation="horizontal">
 
         <com.google.android.material.button.MaterialButton
@@ -32,7 +36,8 @@
             android:layout_height="wrap_content"
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
-            android:text="@string/video" />
+            android:text="@string/video"
+            app:cornerRadius="16dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/shareAudio"
@@ -40,7 +45,8 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:text="@string/audio" />
+            android:text="@string/audio"
+            app:cornerRadius="16dp" />
     </LinearLayout>
 
     <com.google.android.material.button.MaterialButton
@@ -49,7 +55,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="end"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="12dp"
         android:text="@string/cancel" />
 
 </LinearLayout>
