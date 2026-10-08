@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stown</string>
+    <string name="hint_url">ضع الرابط هنا</string>
+    <string name="video">فيديو</string>
+    <string name="audio">صوت</string>
+    <string name="permissions">الصلاحيات</string>
+    <string name="invalid_url">الرابط غير صالح</string>
+    <string name="preparing">جاري التحضير…</string>
+    <string name="downloading">جاري التنزيل…</string>
+    <string name="saving">جاري الحفظ…</string>
+    <string name="done">تم التنزيل</string>
+    <string name="failed">فشل التنزيل</string>
+    <string name="share_title">تنزيل بواسطة Stown</string>
+    <string name="cancel">إلغاء</string>
+    <string name="started">بدأ التنزيل في الخلفية</string>
+    <string name="no_link">لم أجد رابطاً في المشاركة</string>
+    <string name="channel_progress">التنزيلات الجارية</string>
+    <string name="channel_result">نتائج التنزيل</string>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.Stown" parent="Theme.Material3.DayNight.NoActionBar" />
+
+    <!-- Share popup: appears as a dialog over the app the user shared from -->
+    <style name="Theme.Stown.Dialog" parent="Theme.Material3.DayNight.Dialog" />
+
+</resources>
