@@ -78,7 +78,12 @@ class Downloader(
 
     private fun build(url: String, mode: Mode, dir: File, withJs: Boolean): YoutubeDLRequest {
         val request = YoutubeDLRequest(url)
-        request.addOption("--no-playlist")
+        // Instagram photo posts / carousels need playlist mode to fetch every
+        // item; everywhere else a playlist in the link should not all download.
+        val instagram = "instagram.com" in url
+        if (!(mode == Mode.IMAGE && instagram)) {
+            request.addOption("--no-playlist")
+        }
         request.addOption("-o", File(dir, "%(title).80s [%(id)s].%(ext)s").absolutePath)
 
         // Optional members-only support: drop a Netscape-format cookies.txt
@@ -116,6 +121,10 @@ class Downloader(
                 request.addOption("-x")
                 request.addOption("--audio-format", "mp3")
                 request.addOption("--audio-quality", "0")
+            }
+            Mode.IMAGE -> {
+                // Photo posts expose the picture itself as the best "format"
+                request.addOption("-f", "best")
             }
         }
 

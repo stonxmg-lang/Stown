@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<MaterialButton>(R.id.btnVideo).setOnClickListener { start(Mode.VIDEO) }
         findViewById<MaterialButton>(R.id.btnAudio).setOnClickListener { start(Mode.AUDIO) }
+        findViewById<MaterialButton>(R.id.btnImage).setOnClickListener { start(Mode.IMAGE) }
         findViewById<MaterialButton>(R.id.btnPermissions).setOnClickListener {
             Perms.requestRuntime(this)
             Perms.openOverlaySettings(this)

@@ -22,20 +22,27 @@ object MediaSaver {
         }
     }
 
-    private fun folder(mode: Mode): String =
-        if (mode == Mode.VIDEO) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_MUSIC
+    private fun folder(mode: Mode): String = when (mode) {
+        Mode.VIDEO -> Environment.DIRECTORY_MOVIES
+        Mode.AUDIO -> Environment.DIRECTORY_MUSIC
+        Mode.IMAGE -> Environment.DIRECTORY_PICTURES
+    }
 
     private fun mimeOf(file: File, mode: Mode): String {
         val fromExt = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase())
-        return fromExt ?: if (mode == Mode.VIDEO) "video/mp4" else "audio/mpeg"
+        return fromExt ?: when (mode) {
+            Mode.VIDEO -> "video/mp4"
+            Mode.AUDIO -> "audio/mpeg"
+            Mode.IMAGE -> "image/jpeg"
+        }
     }
 
     private fun saveScoped(context: Context, file: File, mode: Mode, mime: String): String {
         val resolver = context.contentResolver
-        val collection = if (mode == Mode.VIDEO) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        } else {
-            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val collection = when (mode) {
+            Mode.VIDEO -> MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            Mode.AUDIO -> MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            Mode.IMAGE -> MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         }
 
         val values = ContentValues().apply {
