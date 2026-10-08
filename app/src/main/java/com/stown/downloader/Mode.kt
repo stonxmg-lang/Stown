@@ -5,6 +5,6 @@ enum class Mode(val key: String) {
     AUDIO("audio");
 
     companion object {
-        fun from(key: String?): Mode = values().firstOrNull { it.key == key } ?: VIDEO
+        fun from(key: String?): Mode = entries.firstOrNull { it.key == key } ?: VIDEO
     }
 }

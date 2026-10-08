@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -20,6 +21,11 @@ import java.util.concurrent.atomic.AtomicInteger
 class DownloadService : Service() {
 
     private val executor = Executors.newSingleThreadExecutor()
+
+    private val wakeLock: PowerManager.WakeLock by lazy {
+        (getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stown:download")
+    }
     private val pending = AtomicInteger(0)
     private val resultIds = AtomicInteger(0)
 
@@ -59,6 +65,7 @@ class DownloadService : Service() {
     private fun process(url: String, mode: Mode) {
         try {
             publish(-1, getString(R.string.preparing))
+            wakeLock.acquire()
 
             if (!StownApp.awaitReady(120_000)) {
                 throw IllegalStateException(StownApp.initError ?: "فشل تهيئة المحرك")
@@ -79,6 +86,7 @@ class DownloadService : Service() {
         } catch (e: Throwable) {
             notifyResult(false, shortError(e))
         } finally {
+            if (wakeLock.isHeld) wakeLock.release()
             if (pending.decrementAndGet() == 0) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()

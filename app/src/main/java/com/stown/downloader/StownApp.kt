@@ -16,11 +16,24 @@ class StownApp : Application() {
             try {
                 YoutubeDL.getInstance().init(this@StownApp)
                 FFmpeg.getInstance().init(this@StownApp)
+                // The bundled yt-dlp goes stale fast because YouTube changes
+                // constantly; refresh it from GitHub before serving downloads.
+                updateYtDlp()
                 ready = true
             } catch (e: Throwable) {
                 Log.e(TAG, "init failed", e)
                 initError = e.message ?: e.toString()
             }
+        }
+    }
+
+    private fun updateYtDlp() {
+        try {
+            val status = YoutubeDL.getInstance().updateYoutubeDL(this@StownApp)
+            Log.i(TAG, "yt-dlp update status: $status")
+        } catch (e: Throwable) {
+            // Offline or GitHub unreachable: the bundled yt-dlp still works
+            Log.w(TAG, "yt-dlp update failed, using bundled version", e)
         }
     }
 
