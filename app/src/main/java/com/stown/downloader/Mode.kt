@@ -2,8 +2,7 @@ package com.stown.downloader
 
 enum class Mode(val key: String) {
     VIDEO("video"),
-    AUDIO("audio"),
-    IMAGE("image");
+    AUDIO("audio");
 
     companion object {
         fun from(key: String?): Mode = entries.firstOrNull { it.key == key } ?: VIDEO

@@ -1,6 +1,7 @@
 package com.stown.downloader
 
 import android.content.Context
+import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
@@ -20,16 +21,16 @@ class Downloader(
         val base = File(context.cacheDir, "dl/${System.currentTimeMillis()}")
         base.mkdirs()
 
-        // yt-dlp's Instagram extractor refuses standalone photo posts with
-        // "There is no video in this post" by design — for IMAGE mode we catch
-        // exactly that case and fetch the photo ourselves from the page.
-        if (mode == Mode.IMAGE && "instagram.com" in url) {
+        // Instagram photo posts have no video stream, so yt-dlp refuses them
+        // ("There is no video in this post"). For VIDEO mode we turn them into
+        // a real video ourselves: the picture(s) + the post's song via ffmpeg.
+        if (mode == Mode.VIDEO && "instagram.com" in url) {
             try {
                 return runProfiles(url, mode, base, onProgress)
             } catch (e: Exception) {
                 if ("no video in this post" !in (e.message ?: "").lowercase()) throw e
-                onProgress(-1, "تنزيل الصورة…")
-                return instagramPhoto(url, base)
+                onProgress(-1, "تحويل الصور إلى فيديو…")
+                return instagramSlideshow(url, base, onProgress)
             }
         }
         return runProfiles(url, mode, base, onProgress)
@@ -93,41 +94,126 @@ class Downloader(
         throw lastError ?: IllegalStateException("فشل التنزيل")
     }
 
-    /** yt-dlp can't extract standalone Instagram photos — scrape the image URL ourselves. */
-    private fun instagramPhoto(url: String, base: File): File {
+    /**
+     * Instagram photo post fallback: scrape the page (with cookies when
+     * available — anonymous requests hit the login wall), grab every carousel
+     * image and the attached song, then render a real video with ffmpeg.
+     */
+    private fun instagramSlideshow(url: String, base: File, onProgress: (Int, String) -> Unit): File {
         val shortcode = Regex("""/(?:p|reel|reels)/([A-Za-z0-9_-]+)""")
             .find(url)?.groupValues?.get(1)
             ?: throw IllegalStateException("تعذر قراءة رابط انستجرام")
-        val page = httpGet("https://www.instagram.com/p/$shortcode/")
-        val imageUrl = listOf(
-            Regex(""""display_url"\s*:\s*"([^"]+)""""),
-            Regex("""property="og:image"\s+content="([^"]+)""""),
-            Regex("""content="([^"]+)"\s+property="og:image""""),
-        ).firstNotNullOfOrNull { re ->
-            re.find(page)?.groupValues?.get(1)
-                ?.replace("\\u0026", "&")
-                ?.replace("&amp;", "&")
-        } ?: throw IllegalStateException("لم أجد الصورة في البوست")
 
-        val clean = imageUrl.substringBefore('?')
-        val ext = when {
-            clean.endsWith(".png", true) -> "png"
-            clean.endsWith(".webp", true) -> "webp"
-            else -> "jpg"
+        val work = File(base, "ig").apply { mkdirs() }
+
+        onProgress(-1, "قراءة البوست…")
+        val page = httpGet("https://www.instagram.com/p/$shortcode/", withCookies = true)
+
+        // Every carousel image, in order
+        val imageUrls = Regex(""""display_url"\s*:\s*"([^"]+)"""")
+            .findAll(page)
+            .map { it.groupValues[1].replace("\\u0026", "&") }
+            .distinct()
+            .toList()
+        if (imageUrls.isEmpty()) {
+            throw IllegalStateException("انستجرام يطلب تسجيل الدخول لعرض هذا البوست — ضع cookies.txt")
         }
-        val out = File(base, "instagram_$shortcode.$ext")
-        httpDownload(imageUrl, out)
-        if (out.length() == 0L) throw IllegalStateException("الصورة التي نزلت فارغة")
-        return out
+
+        onProgress(-1, "تنزيل الصور…")
+        val images = imageUrls.take(20).mapIndexed { i, u ->
+            val f = File(work, "img_%02d.jpg".format(i + 1))
+            httpDownload(u, f, withCookies = false)
+            f
+        }
+
+        onProgress(-1, "البحث عن الصوت…")
+        val audioUrl = listOf(
+            Regex(""""progressive_download_url"\s*:\s*"([^"]+)""""),
+            Regex(""""audio_url"\s*:\s*"([^"]+)""""),
+        ).firstNotNullOfOrNull { re ->
+            re.find(page)?.groupValues?.get(1)?.replace("\\u0026", "&")
+        }
+
+        var audio: File? = null
+        if (audioUrl != null) {
+            try {
+                val f = File(work, "audio.m4a")
+                httpDownload(audioUrl, f, withCookies = true)
+                if (f.length() > 0L) audio = f
+            } catch (_: Exception) {
+                audio = null
+            }
+        }
+
+        onProgress(-1, "صناعة الفيديو…")
+        val out = File(work, "out.mp4")
+        makeVideo(images, audio, out)
+        if (!out.exists() || out.length() == 0L) {
+            throw IllegalStateException("فشل إنشاء الفيديو من الصور")
+        }
+
+        val finalFile = File(base, "instagram_$shortcode.mp4")
+        out.renameTo(finalFile)
+        base.listFiles()?.forEach { if (it.isDirectory && it != work) it.deleteRecursively() }
+        work.deleteRecursively()
+        return finalFile
     }
 
-    private fun httpGet(url: String): String {
+    /**
+     * Render images (+ optional song) into an MP4.
+     * One image  -> still frame for the whole song.
+     * Many images -> slideshow, each shown for [SEG] seconds, song loops to fit.
+     * No song    -> silent video (single image: just a short clip).
+     */
+    private fun makeVideo(images: List<File>, audio: File?, out: File) {
+        val single = images.size == 1
+        val cmd = StringBuilder("-y ")
+
+        if (single) {
+            cmd.append("-loop 1 -i ${images[0].absolutePath} ")
+        } else {
+            images.forEach { cmd.append("-loop 1 -t $SEG -i ${it.absolutePath} ") }
+        }
+
+        val audioIndex = if (single) 1 else images.size
+        if (audio != null) {
+            if (single) {
+                cmd.append("-i ${audio.absolutePath} ")
+            } else {
+                cmd.append("-stream_loop -1 -i ${audio.absolutePath} ")
+            }
+        } else {
+            cmd.append("-f lavfi -i anullsrc=r=44100:cl=stereo ")
+        }
+
+        if (!single) {
+            val filter = buildString {
+                images.indices.forEach { i ->
+                    append("[$i:v]fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v$i];")
+                }
+                images.indices.forEach { append("[v$it]") }
+                append("concat=n=${images.size}:v=1:a=0[v]")
+            }
+            cmd.append("-filter_complex $filter ")
+            cmd.append("-map [v] -map $audioIndex:a ")
+            cmd.append("-c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 192k ")
+            cmd.append("-t ${images.size * SEG} -movflags +faststart ${out.absolutePath}")
+        } else {
+            cmd.append("-r 1 -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p ")
+            cmd.append("-c:a aac -b:a 192k -shortest -movflags +faststart ${out.absolutePath}")
+        }
+
+        FFmpeg.getInstance().execute(cmd.toString())
+    }
+
+    private fun httpGet(url: String, withCookies: Boolean): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = 20_000
         conn.readTimeout = 20_000
         conn.instanceFollowRedirects = true
         conn.setRequestProperty("User-Agent", USER_AGENT)
         conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+        if (withCookies) cookieHeader()?.let { conn.setRequestProperty("Cookie", it) }
         return try {
             if (conn.responseCode != 200) {
                 throw IllegalStateException("HTTP ${conn.responseCode} أثناء قراءة البوست")
@@ -138,21 +224,34 @@ class Downloader(
         }
     }
 
-    private fun httpDownload(url: String, out: File) {
+    private fun httpDownload(url: String, out: File, withCookies: Boolean) {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = 20_000
         conn.readTimeout = 120_000
         conn.instanceFollowRedirects = true
         conn.setRequestProperty("User-Agent", USER_AGENT)
         conn.setRequestProperty("Referer", "https://www.instagram.com/")
+        if (withCookies) cookieHeader()?.let { conn.setRequestProperty("Cookie", it) }
         try {
             if (conn.responseCode != 200) {
-                throw IllegalStateException("HTTP ${conn.responseCode} أثناء تنزيل الصورة")
+                throw IllegalStateException("HTTP ${conn.responseCode} أثناء التنزيل")
             }
             conn.inputStream.use { input -> out.outputStream().use { input.copyTo(it) } }
         } finally {
             conn.disconnect()
         }
+    }
+
+    private fun cookieHeader(): String? {
+        val f = cookiesFile() ?: return null
+        return f.readLines()
+            .filter { it.isNotBlank() && !it.startsWith("#") }
+            .mapNotNull { line ->
+                val parts = line.split("\t")
+                if (parts.size >= 7) parts[5] + "=" + parts[6] else null
+            }
+            .joinToString("; ")
+            .ifBlank { null }
     }
 
     private fun findQjs(): File? {
@@ -163,16 +262,11 @@ class Downloader(
 
     private fun build(url: String, mode: Mode, dir: File, withJs: Boolean): YoutubeDLRequest {
         val request = YoutubeDLRequest(url)
-        // Instagram photo posts / carousels need playlist mode to fetch every
-        // item; everywhere else a playlist in the link should not all download.
-        val instagram = "instagram.com" in url
-        if (!(mode == Mode.IMAGE && instagram)) {
-            request.addOption("--no-playlist")
-        }
+        request.addOption("--no-playlist")
         request.addOption("-o", File(dir, "%(title).80s [%(id)s].%(ext)s").absolutePath)
 
         // Optional members-only support: drop a Netscape-format cookies.txt
-        // (exported from a browser logged into the channel) into
+        // (exported from a browser logged into Instagram/YouTube) into
         // Android/data/com.stown.downloader/files/ and it's picked up here.
         val cookies = cookiesFile()
         if (cookies != null) {
@@ -206,10 +300,6 @@ class Downloader(
                 request.addOption("-x")
                 request.addOption("--audio-format", "mp3")
                 request.addOption("--audio-quality", "0")
-            }
-            Mode.IMAGE -> {
-                // Photo posts expose the picture itself as the best "format"
-                request.addOption("-f", "best")
             }
         }
 
@@ -257,6 +347,9 @@ class Downloader(
     }
 
     companion object {
+        /** Seconds each picture stays on screen in a multi-image slideshow. */
+        private const val SEG = 5
+
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

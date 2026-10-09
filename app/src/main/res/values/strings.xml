@@ -4,7 +4,6 @@
     <string name="hint_url">ضع الرابط هنا</string>
     <string name="video">فيديو</string>
     <string name="audio">صوت</string>
-    <string name="image">صورة</string>
     <string name="permissions">الصلاحيات</string>
     <string name="invalid_url">الرابط غير صالح</string>
     <string name="preparing">جاري التحضير…</string>

@@ -26,7 +26,6 @@ class ShareActivity : AppCompatActivity() {
 
         findViewById<MaterialButton>(R.id.shareVideo).setOnClickListener { begin(url, Mode.VIDEO) }
         findViewById<MaterialButton>(R.id.shareAudio).setOnClickListener { begin(url, Mode.AUDIO) }
-        findViewById<MaterialButton>(R.id.shareImage).setOnClickListener { begin(url, Mode.IMAGE) }
         findViewById<MaterialButton>(R.id.shareCancel).setOnClickListener { finish() }
 
         Perms.requestRuntime(this)

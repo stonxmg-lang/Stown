@@ -40,24 +40,15 @@
             android:id="@+id/btnVideo"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="4dp"
+            android:layout_marginEnd="8dp"
             android:layout_weight="1"
             android:text="@string/video" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnImage"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"
-            android:layout_weight="1"
-            android:text="@string/image" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnAudio"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:text="@string/audio" />
     </LinearLayout>
