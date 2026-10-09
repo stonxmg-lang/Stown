@@ -4,6 +4,8 @@ import android.content.Context
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 /** Runs yt-dlp for one link and returns the finished file (in the app cache). */
 class Downloader(
@@ -18,6 +20,27 @@ class Downloader(
         val base = File(context.cacheDir, "dl/${System.currentTimeMillis()}")
         base.mkdirs()
 
+        // yt-dlp's Instagram extractor refuses standalone photo posts with
+        // "There is no video in this post" by design — for IMAGE mode we catch
+        // exactly that case and fetch the photo ourselves from the page.
+        if (mode == Mode.IMAGE && "instagram.com" in url) {
+            try {
+                return runProfiles(url, mode, base, onProgress)
+            } catch (e: Exception) {
+                if ("no video in this post" !in (e.message ?: "").lowercase()) throw e
+                onProgress(-1, "تنزيل الصورة…")
+                return instagramPhoto(url, base)
+            }
+        }
+        return runProfiles(url, mode, base, onProgress)
+    }
+
+    private fun runProfiles(
+        url: String,
+        mode: Mode,
+        base: File,
+        onProgress: (Int, String) -> Unit,
+    ): File {
         val qjs = findQjs()
         val jsAvailable = qjs != null
 
@@ -68,6 +91,68 @@ class Downloader(
         }
         base.deleteRecursively()
         throw lastError ?: IllegalStateException("فشل التنزيل")
+    }
+
+    /** yt-dlp can't extract standalone Instagram photos — scrape the image URL ourselves. */
+    private fun instagramPhoto(url: String, base: File): File {
+        val shortcode = Regex("""/(?:p|reel|reels)/([A-Za-z0-9_-]+)""")
+            .find(url)?.groupValues?.get(1)
+            ?: throw IllegalStateException("تعذر قراءة رابط انستجرام")
+        val page = httpGet("https://www.instagram.com/p/$shortcode/")
+        val imageUrl = listOf(
+            Regex(""""display_url"\s*:\s*"([^"]+)""""),
+            Regex("""property="og:image"\s+content="([^"]+)""""),
+            Regex("""content="([^"]+)"\s+property="og:image""""),
+        ).firstNotNullOfOrNull { re ->
+            re.find(page)?.groupValues?.get(1)
+                ?.replace("\\u0026", "&")
+                ?.replace("&amp;", "&")
+        } ?: throw IllegalStateException("لم أجد الصورة في البوست")
+
+        val clean = imageUrl.substringBefore('?')
+        val ext = when {
+            clean.endsWith(".png", true) -> "png"
+            clean.endsWith(".webp", true) -> "webp"
+            else -> "jpg"
+        }
+        val out = File(base, "instagram_$shortcode.$ext")
+        httpDownload(imageUrl, out)
+        if (out.length() == 0L) throw IllegalStateException("الصورة التي نزلت فارغة")
+        return out
+    }
+
+    private fun httpGet(url: String): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 20_000
+        conn.readTimeout = 20_000
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty("User-Agent", USER_AGENT)
+        conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+        return try {
+            if (conn.responseCode != 200) {
+                throw IllegalStateException("HTTP ${conn.responseCode} أثناء قراءة البوست")
+            }
+            conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun httpDownload(url: String, out: File) {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 20_000
+        conn.readTimeout = 120_000
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty("User-Agent", USER_AGENT)
+        conn.setRequestProperty("Referer", "https://www.instagram.com/")
+        try {
+            if (conn.responseCode != 200) {
+                throw IllegalStateException("HTTP ${conn.responseCode} أثناء تنزيل الصورة")
+            }
+            conn.inputStream.use { input -> out.outputStream().use { input.copyTo(it) } }
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private fun findQjs(): File? {
