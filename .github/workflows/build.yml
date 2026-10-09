@@ -27,7 +27,7 @@ jobs:
 
       # QuickJS is the JS runtime yt-dlp needs for YouTube.
       # If this step fails the APK is still built (other sites keep working).
-      - name: Build QuickJS (arm64 + armv7)
+      - name: Build QuickJS (best effort — the app already bundles libqjs.so)
         continue-on-error: true
         run: |
           git clone --depth 1 https://github.com/quickjs-ng/quickjs.git /tmp/quickjs
@@ -36,12 +36,19 @@ jobs:
             cmake -S /tmp/quickjs -B /tmp/qjs-$ABI \
               -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
               -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-24 \
-              -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF
-            cmake --build /tmp/qjs-$ABI --target qjs -j4
-            mkdir -p app/src/main/jniLibs/$ABI
-            cp "$(find /tmp/qjs-$ABI -maxdepth 2 -name qjs -type f | head -n1)" app/src/main/jniLibs/$ABI/libqjs.so
+              -DCMAKE_BUILD_TYPE=Release
+            # quickjs-ng: the CLI executable target is qjs_exe ("qjs" is now the static lib)
+            cmake --build /tmp/qjs-$ABI --target qjs_exe -j4 || \
+              cmake --build /tmp/qjs-$ABI --target qjs -j4 || true
+            BIN=$(find /tmp/qjs-$ABI -maxdepth 2 -type f \( -name qjs -o -name qjs_exe \) | head -n1)
+            if [ -n "$BIN" ]; then
+              mkdir -p app/src/main/jniLibs/$ABI
+              cp "$BIN" app/src/main/jniLibs/$ABI/libqjs.so
+            else
+              echo "No qjs CLI built for $ABI — using the bundled libqjs.so"
+            fi
           done
-          find app/src/main/jniLibs -type f
+          find app/src/main/jniLibs -type f || true
 
       - uses: gradle/actions/setup-gradle@v4
         with:

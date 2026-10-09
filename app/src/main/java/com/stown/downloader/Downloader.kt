@@ -1,7 +1,6 @@
 package com.stown.downloader
 
 import android.content.Context
-import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
@@ -203,7 +202,44 @@ class Downloader(
             cmd.append("-c:a aac -b:a 192k -shortest -movflags +faststart ${out.absolutePath}")
         }
 
-        FFmpeg.getInstance().execute(cmd.toString())
+        runFfmpeg(cmd.toString())
+    }
+
+    /**
+     * Run the ffmpeg binary bundled with youtubedl-android. The FFmpeg module
+     * of the library only extracts packages (no execute API), so we invoke
+     * libffmpeg.so directly with the same environment the library uses.
+     */
+    private fun runFfmpeg(cmd: String) {
+        val binDir = File(context.applicationInfo.nativeLibraryDir)
+        val ffmpeg = File(binDir, "libffmpeg.so")
+        if (!ffmpeg.exists()) throw IllegalStateException("الملف التنفيذي ffmpeg غير موجود")
+
+        val packages = File(context.noBackupFilesDir, "youtubedl-android/packages")
+        val ldPath = listOf("python", "ffmpeg")
+            .joinToString(":") { File(packages, it).absolutePath + "/usr/lib" }
+
+        val args = mutableListOf(ffmpeg.absolutePath)
+        args.addAll(cmd.split(" ").filter { it.isNotEmpty() })
+
+        val code: Int
+        val output: String
+        try {
+            val pb = ProcessBuilder(args).redirectErrorStream(true)
+            pb.environment().apply {
+                this["LD_LIBRARY_PATH"] = ldPath
+                this["PATH"] = (System.getenv("PATH") ?: "") + ":" + binDir.absolutePath
+                this["TMPDIR"] = context.cacheDir.absolutePath
+            }
+            val proc = pb.start()
+            output = proc.inputStream.bufferedReader().use { it.readText() }
+            code = proc.waitFor()
+        } catch (e: Exception) {
+            throw IllegalStateException("تعذر تشغيل ffmpeg: ${e.message}")
+        }
+        if (code != 0) {
+            throw IllegalStateException("ffmpeg فشل (كود $code): ${output.takeLast(400)}")
+        }
     }
 
     private fun httpGet(url: String, withCookies: Boolean): String {
